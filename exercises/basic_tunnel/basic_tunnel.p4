@@ -70,8 +70,14 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4 : parse_ipv4;
+            TYPE_MYTUNNEL : parse_myTunnel;
             default : accept;
         }
+    }
+
+    state parse_myTunnel {
+        packet.extract(hdr.myTunnel);
+        transition accept;
     }
 
     state parse_ipv4 {
@@ -108,7 +114,7 @@ control MyIngress(inout headers hdr,
         hdr.ethernet.dstAddr = dstAddr;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
-    
+
     table ipv4_lpm {
         key = {
             hdr.ipv4.dstAddr: lpm;
@@ -124,14 +130,30 @@ control MyIngress(inout headers hdr,
 
     // TODO: declare a new action: myTunnel_forward(egressSpec_t port)
 
+    action myTunnel_forward(egressSpec_t port) {
+        standard_metadata.egress_spec = port;
+    }
 
     // TODO: declare a new table: myTunnel_exact
     // TODO: also remember to add table entries!
-
+    table myTunnel_exact {
+        key = {
+            hdr.myTunnel.dst_id: exact;
+        }
+        actions = {
+            myTunnel_forward;
+            drop;
+            NoAction;
+        }
+        size = 1024;
+        default_action = drop();
+    }
 
     apply {
         // TODO: Update control flow
-        if (hdr.ipv4.isValid()) {
+        if (hdr.myTunnel.isValid()) {
+            myTunnel_exact.apply();
+        } else if (hdr.ipv4.isValid()) {
             ipv4_lpm.apply();
         }
     }
@@ -179,7 +201,8 @@ control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         packet.emit(hdr.ethernet);
         // TODO: emit myTunnel header as well
-        packet.emit(hdr.ipv4);
+          packet.emit(hdr.myTunnel);
+          packet.emit(hdr.ipv4);
     }
 }
 
